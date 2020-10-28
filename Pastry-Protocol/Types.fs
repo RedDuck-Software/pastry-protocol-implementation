@@ -1,7 +1,8 @@
-﻿module Pastry
+﻿namespace PastryProtocol
 
-open System.Collections.Generic
 open System
+
+module Types =
 
 (*type Message = {
     mid : obj;
@@ -51,31 +52,28 @@ type NodeInfo = {
     address : string;
 }
 
-// sort when inserting !
-type LeafSet = NodeInfo Option []
+type LeafSet = {
+    left : NodeInfo Option[]
+    right : NodeInfo Option[]
+}
+
 type RoutingTableRow = NodeInfo Option []
-type RoutingTable = RoutingTableRow Option []
-// sort when inserting ! 2 halves - smaller and bigger.
 type NeighborhoodSet = NodeInfo Option []
 
+type RoutingTable = 
+| Uninitialized of Option<RoutingTableRow>[]
+| Initialized of RoutingTableRow[]
+
 type Node = {
-    node_info : NodeInfo;
+    nodeInfo : NodeInfo;
     routing_table : RoutingTable;
     neighborhood_set : NeighborhoodSet;
     leaf_set : LeafSet
 }
 
-type Credentials = {
-    IPAddress : string
-}
-
-type rowNumber = int
-type isLast = bool
-
 type MessageData = 
-| Join of string
-| Leave of string
-| RoutingTableRow of RoutingTableRow * rowNumber * isLast
+| Join of key:string
+| RoutingTableRow of RoutingTableRow * rowNumber:int * isLastRow:bool
 | LeafSet of LeafSet
 | NewNodeState of Node
 | Custom of string
@@ -86,8 +84,13 @@ type ComparisonResult =
 | GT = 1
 
 type Message = {
-    prev_peer: NodeInfo;
+    prev_peer: NodeInfo Option;
     request_initiator: NodeInfo;
     requestNumber: int;
-    data: MessageData
+    data: MessageData;
+    timestampUTC: DateTime;
+}
+
+type Credentials = {
+    IPAddress : string
 }

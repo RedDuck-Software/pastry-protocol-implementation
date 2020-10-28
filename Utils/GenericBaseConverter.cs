@@ -2,7 +2,7 @@
 using System.Numerics;
 using System.Text;
 
-namespace Utils.CSharp
+namespace CSharp.Utils
 {
     public static class GenericBaseConverter
     {

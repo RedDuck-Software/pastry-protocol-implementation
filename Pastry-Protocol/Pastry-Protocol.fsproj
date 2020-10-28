@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="Config.fs" />
     <Compile Include="Types.fs" />
+    <Compile Include="Utils.fs" />
     <Compile Include="Routing.fs" />
     <Compile Include="Joining.fs" />
 	<Compile Include="PastryAPI.fs" />
@@ -16,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Utils\Utils.CSharp.csproj" />
+    <ProjectReference Include="..\Utils\CSharp.Utils.csproj" />
   </ItemGroup>
 
 </Project>
