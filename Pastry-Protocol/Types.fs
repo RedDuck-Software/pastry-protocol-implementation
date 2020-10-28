@@ -3,7 +3,7 @@
 open System.Collections.Generic
 open System
 
-type Message = {
+(*type Message = {
     mid : obj;
     numHops : int;
     requestInit : obj;
@@ -31,22 +31,6 @@ type Network = {
     failedNodes: int;
 }
 
-type NodeInfo = {
-    identifier: Guid;
-    address : string;
-}
-
-type LeafSet = NodeInfo list
-type RoutingTable = NodeInfo Option list list
-type NeighborhoodSet = NodeInfo list
-
-type Node = {
-    node_info : NodeInfo;
-    routing_table : RoutingTable;
-    neighborhood_set : NeighborhoodSet;
-    leaf_set : LeafSet
-}
-
 type Tables = {
     routingTable : obj;
     leafSet : obj;
@@ -59,4 +43,51 @@ type Tables = {
     requestNumber : int;
     maxRequests : obj;
     hopsPerRequestList : obj;
+}
+*)
+
+type NodeInfo = {
+    identifier: string; // SHA1 of IP Address in the base (2^b)
+    address : string;
+}
+
+// sort when inserting !
+type LeafSet = NodeInfo Option []
+type RoutingTableRow = NodeInfo Option []
+type RoutingTable = RoutingTableRow Option []
+// sort when inserting ! 2 halves - smaller and bigger.
+type NeighborhoodSet = NodeInfo Option []
+
+type Node = {
+    node_info : NodeInfo;
+    routing_table : RoutingTable;
+    neighborhood_set : NeighborhoodSet;
+    leaf_set : LeafSet
+}
+
+type Credentials = {
+    IPAddress : string
+}
+
+type rowNumber = int
+type isLast = bool
+
+type MessageData = 
+| Join of string
+| Leave of string
+| RoutingTableRow of RoutingTableRow * rowNumber * isLast
+| LeafSet of LeafSet
+| NewNodeState of Node
+| Custom of string
+
+type ComparisonResult =
+| LT = -1
+| Eq = 0
+| GT = 1
+
+type Message = {
+    prev_peer: NodeInfo;
+    request_initiator: NodeInfo;
+    requestNumber: int;
+    data: MessageData
 }
