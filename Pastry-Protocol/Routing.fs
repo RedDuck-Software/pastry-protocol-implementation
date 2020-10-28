@@ -210,18 +210,18 @@ module Routing =
         match newNode.routing_table with 
         | Initialized table -> 
    
-        let allNodes = Array.concat [Array.concat table; newNode.leaf_set.left; newNode.leaf_set.right; newNode.neighborhood_set]
-                    |> Array.choose id
+            let allNodes = Array.concat [Array.concat table; newNode.leaf_set.left; newNode.leaf_set.right; newNode.neighborhood_set]
+                        |> Array.choose id
 
-        let newLeftLeaves = getNewLeftLeaves allNodes currentNode
-        let newRightLeaves = getNewRightLeaves allNodes currentNode
-        let newNeighbors = updateNeighbors allNodes currentNode
+            let newLeftLeaves = getNewLeftLeaves allNodes currentNode
+            let newRightLeaves = getNewRightLeaves allNodes currentNode
+            let newNeighbors = updateNeighbors allNodes currentNode
 
-        // TODO update all left leaves...
-        // and right etc...
+            // TODO update all left leaves...
+            // and right etc...
 
-        updateRoutingTable currentNode allNodes
-    
+            updateRoutingTable currentNode allNodes
+        | Uninitialized _ -> raise <| invalidOp("uninitialized node cannot react on new nodes joining!")
         ()
 
     let onMessage currentNode message = 
