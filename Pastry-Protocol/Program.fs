@@ -30,7 +30,7 @@ let main argv =
 
     printfn "session ID: %s" sessionId
 
-    let log = (((LoggerConfiguration()).MinimumLevel.Debug()).WriteTo).Console().CreateLogger() //.File(filePath).CreateLogger()
+    let log = (((LoggerConfiguration()).MinimumLevel.Debug()).WriteTo).File(filePath).CreateLogger()
     Serilog.Log.Logger <- log
 
     ////////////////// LOGGING END //////////////////////

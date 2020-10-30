@@ -73,7 +73,7 @@ module Types =
     }
 
     type NodeActorUpdate = 
-    | BootRequest of address:BigInteger
+    | BootRequest of address:BigInteger * peersLength: int
     | Message of Message
 
     type MessageToSend = {

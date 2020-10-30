@@ -94,7 +94,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
             let newPeers = sendMessages peers messagesToSend
 
             Some((newState, newPeers))
-        | BootRequest address -> 
+        | BootRequest (address, peers) -> 
             let bootNode = lastState.node
 
             if not lastState.nodeState.isTablesSpread then raise <| invalidOp("it's not initialized yet")
@@ -114,16 +114,14 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
 
             let newNode = getNewNodeInfo (Uninitialized([||])) newNodeNeighbors address
             let newNodeMetadata = {isLeafSetReady = false; isRoutingTableReady = false; isTablesSpread = false}
-            let newNetworkData = { peers = lastState.network.peers }
+            let newNetworkData = { peers = peers }
             // NOTES1: neighborhood set should be modified here.. boot should update and current node should update
             // neighborhood is set in getNewNodeInfo, and it will be sent back to the node in spreadTables
 
             let newNodeData = { node = newNode; nodeState = newNodeMetadata; network = newNetworkData }
 
-            log "Asking for newActorRef"
             // here network has info about the new node and it will be able to receive messages (leafset etc)
             mailbox.Context.Parent.Ask(NewActorRef(newNodeData)) |> Async.AwaitTask |> Async.Ignore |> Async.RunSynchronously
-            log "got past it :P"
 
             let date = DateTime.UtcNow
             let message = { // TODO redo these to give nodes to send to
@@ -172,7 +170,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
   imp (nodeData, initialActors)
 
 let networkActor (mailbox : Actor<'a>) =
-    let rec imp (peers:IActorRef list) = 
+    let rec imp (peers:IActorRef list, totalLength: int) = 
         actor {
             let! objMsg = mailbox.Receive()
 
@@ -180,6 +178,8 @@ let networkActor (mailbox : Actor<'a>) =
             log <| sprintf "%s Message %s; Peers %i; %s" hz (json objMsg) (peers.Length) hz
 
             let msg = (objMsg :> obj) :?> NetworkRequest
+
+            let mutable totalLength = totalLength
 
             let updatedPeers = 
                 match msg with 
@@ -193,18 +193,19 @@ let networkActor (mailbox : Actor<'a>) =
                         then raise <| invalidOp("it is still bootstrapping!")
                         else 
                             let closestPeer = peers |> List.minBy (fun i -> abs ((BigInteger.Parse i.Path.Name) - address))
-                            closestPeer <! BootRequest(address)
+                            totalLength <- totalLength + 1
+                            closestPeer <! BootRequest(address, totalLength)
                     None
                 | NewActorRef nodeData -> 
                     let newPeerActorRef = spawnChild (nodeActor nodeData peers) (nodeData.node.nodeInfo.address.ToString()) mailbox
-                    mailbox.Context.Sender.Tell(newPeerActorRef, mailbox.Context.Self) // might throw sass our way in the logs that it's a deadletter - TBD check ; if so - it's fine !
+                    mailbox.Context.Sender.Tell(newPeerActorRef, mailbox.Context.Self)
                     Some(newPeerActorRef :: peers)
 
             let newPeers = Option.defaultValue peers updatedPeers
-            // does not return to the caller; need to replace <! with returning!
-            return! imp newPeers
+
+            return! imp (newPeers,totalLength)
         }
-    imp []
+    imp ([], 1)
 
 let bootstrapNetwork ipAddress = 
     let routingTableColumns = Array.init Config.routingTableColumns (fun _ -> None)

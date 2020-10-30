@@ -222,11 +222,14 @@ module Routing =
             match routingTable with
             | Uninitialized _ -> raise <| invalidOp "cannot update routing table capacity when it's not initialized"
             | Initialized table -> 
-                let rowsCount = getRoutingTableRowsLength network
+                let rowsCount = getRoutingTableRowsLength { peers = peers }
                 let neededRowsCount = rowsCount - (table.Length) // index = number - 1
+
+                printfn "peers: %i" peers
 
                 if neededRowsCount > 0 
                     then
+                        printfn "neededRowsCount > 1"
                         seq { 
                             yield! table;
                             yield! Array.init neededRowsCount (fun _ -> Array.init (Config.routingTableColumns) (fun _ -> None));
