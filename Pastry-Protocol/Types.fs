@@ -44,11 +44,18 @@ module Types =
         isRoutingTableReady : bool;
     }
 
+    type NodeData = {
+        node: Node;
+        nodeState: NodeMetadata;
+        network: Network;
+    }
+
     type MessageData = 
     | Join of key:string
     | RoutingTableRow of RoutingTableRow * rowNumber:int
     | LeafSet of LeafSet
-    | NewNodeState of Node
+    | NewNodeState of NodeData
+    | BootNode of address: BigInteger
     | Custom of string
 
     type ComparisonResult =
@@ -65,6 +72,16 @@ module Types =
         timestampUTC: DateTime;
     }
 
-    type Credentials = {
-        IPAddress : BigInteger
+    type NodeActorUpdate = 
+    | BootRequest of address:BigInteger
+    | Message of Message
+
+    type MessageToSend = {
+        message: Message;
+        recipient: NodeInfo;
     }
+
+    type NetworkRequest = 
+    | GetActorRef of address: string
+    | NewActorRef of NodeData
+    | BootNode of address: BigInteger

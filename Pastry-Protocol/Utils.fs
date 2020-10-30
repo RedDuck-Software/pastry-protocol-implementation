@@ -3,7 +3,6 @@
 open Types
 open CSharp.Utils
 open System.Numerics
-open TempState
 
 module Utils =
     let onlySome a = Array.choose id a
