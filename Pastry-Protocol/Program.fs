@@ -14,11 +14,15 @@ open Serilog
 open System.IO
 open System.Reflection
 open Akka.Actor
+open PastryProtocol.Types
+open System.Threading
 
 let rnd = System.Random()
 
 [<EntryPoint>]
 let main argv =
+    let numNodes = int argv.[0]
+    let numRequests = int argv.[1]
     let logDirectory = Path.Combine(Path.GetTempPath(), Assembly.GetCallingAssembly().FullName)
     if not <| System.IO.Directory.Exists(logDirectory)
         then Directory.CreateDirectory(logDirectory) |> ignore
@@ -36,12 +40,22 @@ let main argv =
     ////////////////// LOGGING END //////////////////////
     ///////////////////////////////////////////////////////////////////
 
+    let mutable s = numRequests / 2
     let mutable newNodeIpAddress = BigInteger 80100200500L
     let networkRef = Joining.bootstrapNetwork newNodeIpAddress
     
-    for i in 1..30 do
+    // network join
+    for i in 2..numNodes do
         newNodeIpAddress <- newNodeIpAddress + bigint 1        
         Joining.joinNetwork networkRef newNodeIpAddress
+
+        // messages
+    for i in 1..numRequests do
+        Thread.Sleep(1000)
+        s <- s + 1
+        networkRef <! BroadcastMessage((sprintf "Message # %i" i))
+
+    printfn "Average hops: %i" <| int ((bigint (System.Math.Log2(float numNodes)) )+ bigint (System.Math.Log2(float s))) / 2
 
     Console.ReadLine () |> ignore
     0 // return an integer exit code

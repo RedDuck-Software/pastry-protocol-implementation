@@ -75,6 +75,7 @@ module Types =
     type NodeActorUpdate = 
     | BootRequest of address:BigInteger * peersLength: int
     | Message of Message
+    | SendMessageRequest of string
 
     type MessageToSend = {
         message: Message;
@@ -85,3 +86,4 @@ module Types =
     | GetActorRef of address: string
     | NewActorRef of NodeData
     | BootNode of address: BigInteger
+    | BroadcastMessage of msg: string

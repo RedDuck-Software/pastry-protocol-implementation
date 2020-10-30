@@ -67,12 +67,22 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
     actorRef <! Message(message)
     newlist
 
-  let sendMessages actors messagesToSend = 
+  let sendMessagesWithTimeout actors messagesToSend timeout =
     let mutable actors = actors
     for messageToSend in messagesToSend do
         let message = messageToSend.message
         let nodeInfo = messageToSend.recipient
         actors <- sendMessage actors message nodeInfo
+
+    actors
+
+  let sendMessages actors messagesToSend =
+    let mutable actors = actors
+    for messageToSend in messagesToSend do
+        let message = messageToSend.message
+        let nodeInfo = messageToSend.recipient
+        actors <- sendMessage actors message nodeInfo
+
     actors
 
   let rec imp a =
@@ -88,10 +98,21 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
 
       let updatedState = 
         match nodeUpdate with 
+        | SendMessageRequest text ->
+            let message = {
+                Message.request_initiator = lastState.node.nodeInfo;
+                Message.data = Custom(text);
+                Message.prev_peer = None;
+                Message.timestampUTC = DateTime.UtcNow;
+                Message.requestNumber = 1;
+            }
+            let messagesToSend = Array.map (fun i -> {MessageToSend.recipient = i; MessageToSend.message = message}) (peersFromAllTables lastState.node)
+            sendMessages peers messagesToSend |> ignore
+            None
         | Message message -> 
             let (newState, messagesToSend) = Routing.onMessage (lastState, message)
            
-            let newPeers = sendMessages peers messagesToSend
+            let newPeers = sendMessagesWithTimeout peers messagesToSend 1000
 
             Some((newState, newPeers))
         | BootRequest (address, peers) -> 
@@ -154,7 +175,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
                     let message = {
                         requestNumber = 1; 
                         prev_peer = None; 
-                        request_initiator = bootNode.nodeInfo; 
+                        request_initiator = bootNode.nodeInfo;
                         data = LeafSet(bootNode.leaf_set);
                         timestampUTC = date;
                     }
@@ -183,6 +204,9 @@ let networkActor (mailbox : Actor<'a>) =
 
             let updatedPeers = 
                 match msg with 
+                | BroadcastMessage str -> 
+                    Seq.iter (fun i -> i <! SendMessageRequest(str)) (mailbox.Context.GetChildren())
+                    None
                 | GetActorRef id -> 
                     let peerRef = List.find (fun (i:IActorRef) -> i.Path.Name = id) peers
                     mailbox.Context.Sender.Tell(peerRef, mailbox.Context.Self)
@@ -203,7 +227,7 @@ let networkActor (mailbox : Actor<'a>) =
 
             let newPeers = Option.defaultValue peers updatedPeers
 
-            return! imp (newPeers,totalLength)
+            return! imp (newPeers, totalLength)
         }
     imp ([], 1)
 

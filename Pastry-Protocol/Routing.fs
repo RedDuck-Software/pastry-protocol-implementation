@@ -68,7 +68,7 @@ module Routing =
         let currentNode = currentNodeState.node
         match currentNode.routing_table with 
         | Initialized routingTable ->
-            let row = Array.tryItem message.requestNumber routingTable // ??? - should be fine !
+            let row = Array.tryItem message.requestNumber routingTable
             let nextNode = getForwardToNode currentNode key
 
             let routingMessage = row |> Option.bind (fun row -> 
@@ -297,7 +297,8 @@ module Routing =
         let (currentNodeData, message) = a
         let (newNodeState, messagesToSend) =
             match message.data with
-            | Join key -> onJoinMessage currentNodeData message key DateTime.UtcNow
+            | Join key -> 
+                onJoinMessage currentNodeData message key DateTime.UtcNow
             | RoutingTableRow (row, rowNumber) -> 
                         let newNodeData = onRoutingTableUpdate currentNodeData row rowNumber
                         (newNodeData, [])
@@ -307,6 +308,9 @@ module Routing =
             | NewNodeState newNode -> 
                         let newNode = onNewNodeState currentNodeData newNode
                         ({ currentNodeData with node = newNode; }, [])
+            | Custom a -> 
+                        printfn "received %s." a
+                        (currentNodeData, [])
             | _ -> raise <| invalidOp("message.data is invalid")
     
         let isReadyToSpread = isReady newNodeState && (not <| newNodeState.nodeState.isTablesSpread)
