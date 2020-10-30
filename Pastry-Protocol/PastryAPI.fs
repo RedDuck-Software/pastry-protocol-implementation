@@ -1,14 +1,7 @@
 ﻿module PastryAPI
 
-open Pastry
-open System.Text
-open Utils.CSharp
-open System.Numerics
-open System.Linq
-open System
-
 let pastryInit credentials application initNode =
-    let nodeId = getHash credentials.IPAddress
+        ()
 
     // send "route" message to initNode actor. 
     // initNode will route it to closest Z node. 
@@ -47,9 +40,7 @@ state has changed, it responds with its updated state and B restarts its operati
     *)
 
     // initialize
-
-    nodeId
-
+    
 // causes Pastry to route the given message to the node with nodeId numerically closest to the key,
 // among all live Pastry nodes.
 // TODO this should be a method of actors

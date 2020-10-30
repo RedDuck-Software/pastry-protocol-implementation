@@ -1,9 +1,12 @@
 ﻿// Learn more about F# at http://fsharp.org
 
 open Microsoft.FSharp.Core
-open Utils.CSharp
+open System
+open PastryProtocol.Utils
+open System.Numerics
+open Newtonsoft.Json
 
-let rec bin rows myBin add = 
+(*let rec bin rows myBin add = 
     match rows with 
     | 0 -> myBin |> Seq.map (fun x -> (x, [])) |> dict
     | _ -> 
@@ -25,13 +28,22 @@ let entry num maxRequests failurePercentage =
                         lastRequest = 0;
                 }
     //initNetwork network
-    network
+    network*)
+
+let rnd = System.Random()
 
 [<EntryPoint>]
 let main argv =
-    let hash1 = PastryAPI.getHash "abc"
-    let hash2 = PastryAPI.getHash "abl"
-    let base1 = GenericBaseConverter.ConvertFromString(hash1, 16)
-    let base2 = GenericBaseConverter.ConvertFromString(hash2, 16)
+    let bootIpAddress = BigInteger 80100200500L
+    Joining.bootstrapNetwork { IPAddress = bootIpAddress }
+    
+    for i in 1..10 do
+        let newNodeIpAddress = bootIpAddress + BigInteger i
+        let (boot, _, _) = TempState.nodeStates |> List.minBy (fun (i, _, _) -> abs <| i.nodeInfo.address - newNodeIpAddress)
+        
+        printfn "-------------------------------------------------------------------------------"
+        printfn "Node %i has joined. New State: %s" (i - 1) <| JsonConvert.SerializeObject(TempState.nodeStates)
+        printfn "-------------------------------------------------------------------------------"
+        Joining.join boot { IPAddress = newNodeIpAddress } DateTime.UtcNow
 
     0 // return an integer exit code

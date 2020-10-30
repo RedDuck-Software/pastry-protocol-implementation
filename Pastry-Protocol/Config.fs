@@ -7,6 +7,6 @@ let L = 16
 let b = 2
 
 let numberBase = pown 2 b
-let leafSize = pown 2 b
+let leafSize = L
 let neighborhoodSize = pown 2 b
 let routingTableColumns = pown 2 b

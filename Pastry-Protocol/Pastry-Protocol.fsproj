@@ -9,11 +9,16 @@
   <ItemGroup>
     <Compile Include="Config.fs" />
     <Compile Include="Types.fs" />
+    <Compile Include="TempState.fs" />
     <Compile Include="Utils.fs" />
     <Compile Include="Routing.fs" />
     <Compile Include="Joining.fs" />
 	<Compile Include="PastryAPI.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
   </ItemGroup>
 
   <ItemGroup>
