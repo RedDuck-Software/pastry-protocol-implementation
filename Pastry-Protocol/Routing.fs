@@ -16,7 +16,7 @@ module Routing =
 
         count   
 
-    let getRoutingTableRowsLength network = 
+    let getRoutingTableRowsLength (network:Network) = 
         let result = int <| System.Math.Log(float network.peers, float <| pown 2 Config.b)
         if result = 0 then 1 else result
 
@@ -26,43 +26,47 @@ module Routing =
     // that's simply routing of a message, if noteTo = key I think we don't need it. 
     // Returns Some if found something better than current node and None if current node is the closest
     let getForwardToNode currentNode key =
-        let leafSet = allLeaves currentNode.leaf_set
+        if currentNode.nodeInfo.identifier = key then None
+        else
+            let leafSet = allLeaves currentNode.leaf_set
 
-        let withinLeafSetRange = 
-            match (Array.tryHead leafSet, Array.tryLast leafSet) with 
-            | (None, None) -> false
-            | (Some head, Some last) -> (strToBigInt head.identifier) <= strToBigInt key && strToBigInt key <= strToBigInt last.identifier
-            | _ -> true
+            let withinLeafSetRange = 
+                match (Array.tryHead leafSet, Array.tryLast leafSet) with 
+                | (None, None) -> false
+                | (Some head, Some last) -> (strToBigInt head.identifier) <= strToBigInt key && strToBigInt key <= strToBigInt last.identifier
+                | _ -> true
 
-        if withinLeafSetRange
-            then 
-                let minByDiff = Array.minBy (fun i -> abs (strToBigInt key - strToBigInt i.identifier)) (Array.concat [[|currentNode.nodeInfo|];leafSet])
+            if withinLeafSetRange
+                then 
+                    let minByDiff = Array.minBy (fun i -> abs (strToBigInt key - strToBigInt i.identifier)) (Array.concat [[|currentNode.nodeInfo|];leafSet])
                 
-                if minByDiff.identifier = currentNode.nodeInfo.identifier 
-                    then None
-                    else Some(minByDiff)
-            else
-                let l = sharedPrefix key currentNode.nodeInfo.identifier
-                let l_in_key_value = key.ToString().[l] |> toBigInt |> int
+                    if minByDiff.identifier = currentNode.nodeInfo.identifier 
+                        then None
+                        else Some(minByDiff)
+                else
+                    let l = sharedPrefix key currentNode.nodeInfo.identifier
+                    let l_in_key_value = key.[l] |> toBigInt |> int
             
-                match currentNode.routing_table with 
-                | Initialized routingTable -> 
-                    let routingTableCell = (Array.tryItem l routingTable)
-                                            |> Option.bind (Array.tryItem l_in_key_value) |> Option.flatten
-                    match routingTableCell with
-                    | Some peer ->  Some(peer) // forward to this address
-                    | None -> // rare case
-                        let union = peersFromAllTables currentNode
-                        let predicate1 = (fun peer -> sharedPrefix peer.identifier key >= l)
-                        let predicate2 = (fun peer -> 
-                                            let key10 = strToBigInt key 
-                                            let peer10 = strToBigInt peer.identifier 
-                                            let node10 = strToBigInt currentNode.nodeInfo.identifier
+                    match currentNode.routing_table with 
+                    | Initialized routingTable -> 
+                        let routingTableCell = (Array.tryItem l routingTable)
+                                                |> Option.bind (Array.tryItem l_in_key_value) |> Option.flatten
+                        match routingTableCell with
+                        | Some peer ->  Some(peer) // forward to this address
+                        | None -> // rare case
+                            let union = peersFromAllTables currentNode
+                            let predicate1 = (fun peer -> sharedPrefix peer.identifier key >= l)
+                            let predicate2 = (fun peer -> 
+                                                let key10 = strToBigInt key 
+                                                let peer10 = strToBigInt peer.identifier 
+                                                let node10 = strToBigInt currentNode.nodeInfo.identifier
                     
-                                            abs (peer10 - key10) < abs (node10 - key10))
-                        let T = Array.tryFind (fun i -> predicate1 i && predicate2 i) union
-                        T
-                | Uninitialized _ -> raise <| invalidOp("Attempt to route a message through uninitialized node")
+                                                abs (peer10 - key10) < abs (node10 - key10))
+                            let T = Array.tryFind (fun i -> predicate1 i && predicate2 i) union
+                            T
+                    | Uninitialized _ -> raise <| invalidOp("Attempt to route a message through uninitialized node")
+          
+
 
     let onJoinMessage currentNodeState message key date = 
         let currentNode = currentNodeState.node
@@ -214,7 +218,7 @@ module Routing =
 
     let leavesDataSelector i = convertBaseFrom Config.numberBase i.identifier
 
-    let updateRoutingTableCapacity nodeData peers = 
+    let updateRoutingTableCapacity nodeData (peers:int) = 
         let node = nodeData.node
         let network = nodeData.network
         let routingTable = node.routing_table
@@ -225,11 +229,8 @@ module Routing =
                 let rowsCount = getRoutingTableRowsLength { peers = peers }
                 let neededRowsCount = rowsCount - (table.Length) // index = number - 1
 
-                printfn "peers: %i" peers
-
                 if neededRowsCount > 0 
                     then
-                        printfn "neededRowsCount > 1"
                         seq { 
                             yield! table;
                             yield! Array.init neededRowsCount (fun _ -> Array.init (Config.routingTableColumns) (fun _ -> None));
@@ -249,11 +250,12 @@ module Routing =
         for node in allNodes do
             let sharedIndex = sharedPrefix node.identifier currentNode.nodeInfo.identifier
             let row = sharedIndex
-            let column = node.identifier.[sharedIndex + 1] |> toBigInt |> int
+            let column = node.identifier.[sharedIndex] |> toBigInt |> int
 
             let newTable = 
-                match currentNode.routing_table with 
+                match tableState with 
                 | Initialized table -> 
+                    let table = Array.copy <| Array.map Array.copy table
                     match (Array.tryItem row table) |> Option.bind (Array.tryItem column) with
                     | None -> () // no such row or such column in that row. out of range, so don't insert
                     | Some(None) -> table.[row].[column] <- Some(node) 
@@ -293,7 +295,7 @@ module Routing =
 
         | Uninitialized _ -> raise <| invalidOp("uninitialized node cannot react on new nodes joining!")        
 
-    let onMessage a : (NodeData * MessageToSend list) =
+    let onMessage (a:(NodeData * Message)) : (NodeData * MessageToSend list) =
         let (currentNodeData, message) = a
         let (newNodeState, messagesToSend) =
             match message.data with
@@ -308,9 +310,13 @@ module Routing =
             | NewNodeState newNode -> 
                         let newNode = onNewNodeState currentNodeData newNode
                         ({ currentNodeData with node = newNode; }, [])
-            | Custom a -> 
-                        printfn "received %s." a
-                        (currentNodeData, [])
+            | Custom msg -> 
+                        let routeResult = getForwardToNode currentNodeData.node msg.recipientKey
+                        match routeResult with 
+                        | None -> (currentNodeData, [])
+                        | Some nodeInfo -> 
+                            let msgToSend = { recipient = nodeInfo; message = {message with requestNumber = message.requestNumber + 1; prev_peer = Some(currentNodeData.node.nodeInfo); } }
+                            (currentNodeData, [msgToSend])
             | _ -> raise <| invalidOp("message.data is invalid")
     
         let isReadyToSpread = isReady newNodeState && (not <| newNodeState.nodeState.isTablesSpread)
@@ -333,5 +339,6 @@ module Routing =
 // 2. Adjusting tables of nodes to correspond to the current node +
 // 3. Re-fa-ctor. +
 // 4. Test +
-// 5. Actors
-// 6. Test
+// 5. Actors + 
+// 6. Test + 
+// 7 hops calculation +

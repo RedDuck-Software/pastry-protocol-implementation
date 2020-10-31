@@ -46,17 +46,13 @@ let main argv =
     
     // network join
     for i in 2..numNodes do
-        System.Threading.Thread.Sleep(1000) // give it a second to initialize
+        System.Threading. Thread.Sleep(1000) // give it a second to initialize
         newNodeIpAddress <- newNodeIpAddress + bigint 1        
         Joining.joinNetwork networkRef newNodeIpAddress
 
-        // messages
-    for i in 1..numRequests do
-        Thread.Sleep(1000)
-        s <- s + 1
-        networkRef <! BroadcastMessage((sprintf "Message # %i" i))
-
-    printfn "Average hops: %i" <| int ((bigint (System.Math.Log2(float numNodes)) )+ bigint (System.Math.Log2(float s))) / 2
+    // test messages + calculate hops    
+    let testingSessionKey = "random"
+    networkRef <! HopsTestingRequest({ HopsTestingRequest.hopsTestingData = { sessionKey = testingSessionKey }; sendersCount = numRequests })
 
     Console.ReadLine () |> ignore
     0 // return an integer exit code

@@ -19,6 +19,7 @@ let log a = lock locker (fun () -> Serilog.Log.Logger.Information a )
 let json = Newtonsoft.Json.JsonConvert.SerializeObject
 
 let sha = System.Security.Cryptography.SHA1.Create()
+let rnd = Random()
 
 let getHash (input:string) = 
     let byteHash = sha.ComputeHash(Encoding.UTF8.GetBytes(input))
@@ -37,8 +38,10 @@ let getHash (input:string) =
     let paddedZeros = Array.init remainingDigits (fun i -> '0') |> String
     paddedZeros + baseHash
 
+let getNodeId ipAddress = getHash <| convertBaseTo Config.numberBase ipAddress
+
 let getNewNodeInfo routingTable neighborhoodset ipAddress =
-    let nodeId = getHash <| convertBaseTo Config.numberBase ipAddress
+    let nodeId = getNodeId ipAddress
     {
         nodeInfo = { address = ipAddress; identifier = nodeId }
         routing_table = routingTable;
@@ -48,6 +51,27 @@ let getNewNodeInfo routingTable neighborhoodset ipAddress =
         }
         neighborhood_set = neighborhoodset
     }
+
+let networkTestingActor (networkCallsLimit: int) (mailbox : Actor<'a>) = 
+    let rec imp (currentNetworkCalls, totalHops) =
+        actor {
+            let! hops = mailbox.Receive()
+            printfn "NetworkTESTING: Received #%i request, hops data: %A" (currentNetworkCalls + 1) hops
+
+            let hops = (hops :> obj) :?> int
+
+            let currentNetworkCalls = currentNetworkCalls + 1
+            let totalHops = totalHops + hops
+
+            if currentNetworkCalls = networkCallsLimit 
+                then 
+                    printfn "TEST RESULTS:\r\nMessages: %i; Total hops:%i; Average hops:%f" currentNetworkCalls totalHops (float totalHops / float currentNetworkCalls)
+                    // todo stop current actor?
+                else
+                    return! imp (currentNetworkCalls, totalHops)
+        }
+    printfn "Starting TEST Actor:\r\nMessages limit: %i;" networkCallsLimit
+    imp (0, 0)
 
 let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Actor<'a>) =    
   let getPeerByAddress address (actors:IActorRef list) = async {
@@ -67,15 +91,6 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
     actorRef <! Message(message)
     newlist
 
-  let sendMessagesWithTimeout actors messagesToSend timeout =
-    let mutable actors = actors
-    for messageToSend in messagesToSend do
-        let message = messageToSend.message
-        let nodeInfo = messageToSend.recipient
-        actors <- sendMessage actors message nodeInfo
-
-    actors
-
   let sendMessages actors messagesToSend =
     let mutable actors = actors
     for messageToSend in messagesToSend do
@@ -85,9 +100,10 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
 
     actors
 
-  let rec imp a =
+  let rec imp (state:NodeActorState) =
     actor {
-      let (nodeData, (peers:IActorRef list)) = a
+      let nodeData = state.nodeData 
+      let peers = state.peers 
       let! objMsg = mailbox.Receive()
 
       let lastIsInitialized = nodeData.nodeState.isTablesSpread
@@ -96,25 +112,43 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
       let nodeUpdate = (objMsg :> obj) :?> Types.NodeActorUpdate
       let sendMessageToCurrentPeers = sendMessage peers
 
-
       let (nodeData, peers) = 
         match nodeUpdate with 
-        | SendMessageRequest text ->
+        | NodeHopsTestingRequest request ->
             let message = {
-                Message.request_initiator = nodeData.node.nodeInfo;
-                Message.data = Custom(text);
-                Message.prev_peer = None;
-                Message.timestampUTC = DateTime.UtcNow;
-                Message.requestNumber = 1;
+                request_initiator = nodeData.node.nodeInfo;
+                data = Custom({ recipientKey = request.key; payload = request.data; requestId = request.hopsTestingSession.sessionKey });
+                prev_peer = None;
+                timestampUTC = DateTime.UtcNow;
+                requestNumber = 1;
             }
-            let messagesToSend = Array.map (fun i -> {MessageToSend.recipient = i; MessageToSend.message = message}) (peersFromAllTables nodeData.node)
-            sendMessages peers messagesToSend |> ignore
-            (nodeData, peers)
-        | Message message -> 
-            let (nodeData, messagesToSend) = Routing.onMessage (nodeData, message)                      
-            let peers = sendMessagesWithTimeout peers messagesToSend 1000
+
+            let nextNode = Routing.getForwardToNode nodeData.node request.key
+
+            match message.data with
+            | Custom _ ->
+                match nextNode with // none -> send to parent that this request was delivered with 1 hop
+                | None -> mailbox.Context.Parent <! HopsTestingSessionUpdate({ session = request.hopsTestingSession; hopsPerCurrentRequest = 1; })
+                | Some a -> sendMessage peers message a |> ignore
+            | _ -> ()
 
             (nodeData, peers)
+        | Message message ->
+            let (nodeData, messagesToSend) = Routing.onMessage (nodeData, message)
+
+            let peers = 
+                match message.data with 
+                | Custom msg -> 
+                    if messagesToSend.Length = 0 then 
+                            mailbox.Context.Parent <! HopsTestingSessionUpdate({ session = { sessionKey = msg.requestId }; hopsPerCurrentRequest = message.requestNumber; })
+                            peers
+                    elif messagesToSend.Length = 1 then
+                        sendMessages peers messagesToSend
+                    else raise <| invalidOp("cannot forward to more than 1")
+                | _ -> sendMessages peers messagesToSend
+
+            (nodeData, peers)
+            
         | BootRequest (address, peers) -> 
             if not nodeData.nodeState.isTablesSpread then raise <| invalidOp("it's not initialized yet")
 
@@ -152,9 +186,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
             }
 
             let newList = sendMessageToCurrentPeers message joiningNodeData.node.nodeInfo
-
-            let nodeInfo = Routing.getForwardToNode nodeData.node joiningNodeData.node.nodeInfo.identifier
-            
+            let nodeInfo = Routing.getForwardToNode nodeData.node joiningNodeData.node.nodeInfo.identifier            
             let sendMessageToNewPeers = sendMessage newList
 
             let peers = 
@@ -179,15 +211,15 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
                     }
                     sendMessageToNewPeers message joiningNodeData.node.nodeInfo 
             (nodeData, peers)
-             
+            
       log <| sprintf "%s updating state to: %s" nodeData.node.nodeInfo.identifier (json nodeData)
 
       if lastIsInitialized = false && nodeData.nodeState.isTablesSpread = true then
             mailbox.Context.Parent <! NodeInitialized(nodeData.node.nodeInfo.address)
 
-      return! imp (nodeData, peers)
+      return! imp { state with nodeData = nodeData; peers = peers }
     }
-  imp (nodeData, initialActors)
+  imp { nodeData = nodeData; peers = initialActors; }
 
 let networkActor (mailbox : Actor<'a>) =
     let rec imp (peers:((IActorRef * bool) list)) = 
@@ -207,11 +239,28 @@ let networkActor (mailbox : Actor<'a>) =
 
             let updatedPeers = 
                 match msg with 
+                | HopsTestingSessionUpdate upd -> 
+                    mailbox.Context.Child(upd.session.sessionKey) <! upd.hopsPerCurrentRequest
+                    None
                 | NodeInitialized address ->
                     let (actorRef, isInited) = List.find (fun ((i:IActorRef), _) -> (BigInteger.Parse i.Path.Name) = address) peers
                     Some <| (actorRef, true) :: List.except [(actorRef, isInited)] peers
-                | BroadcastMessage str -> 
-                    Seq.iter (fun i -> i <! SendMessageRequest(str)) (mailbox.Context.GetChildren())
+                | HopsTestingRequest request ->
+                    let _ = spawnChild (networkTestingActor request.sendersCount) request.hopsTestingData.sessionKey mailbox
+
+                    let senders = Array.init request.sendersCount (fun i -> rnd.Next(0, initedPeers.Length)) |> Array.map (fun i -> initedPeers.Item i)
+                    let keys = initedPeers |> List.except senders |> List.map (fun i -> (BigInteger.Parse i.Path.Name) |> getNodeId) |> List.truncate request.sendersCount
+
+                    for senderIndx in 0..senders.Length - 1 do
+                        let key = keys.[senderIndx]
+                        let sender = senders.[senderIndx]
+                        let request = { 
+                            hopsTestingSession = request.hopsTestingData;
+                            data = (sprintf "testing node #%s" sender.Path.Name);
+                            key = key;
+                        }
+
+                        sender <! NodeHopsTestingRequest(request)
                     None
                 | GetActorRef id -> 
                     let (peerRef, _) = List.find (fun (i:IActorRef, _) -> i.Path.Name = id) peers

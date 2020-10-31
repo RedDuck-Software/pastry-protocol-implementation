@@ -2,6 +2,7 @@
 
 open System
 open System.Numerics
+open Akka.Actor
 
 module Types =
 
@@ -50,13 +51,19 @@ module Types =
         network: Network;
     }
 
+    type CustomMessage = {
+        recipientKey : string;        
+        payload : string;
+        requestId : string;
+    }
+
     type MessageData = 
     | Join of key:string
     | RoutingTableRow of RoutingTableRow * rowNumber:int
     | LeafSet of LeafSet
     | NewNodeState of NodeData
     | BootNode of address: BigInteger
-    | Custom of string
+    | Custom of CustomMessage
 
     type ComparisonResult =
     | LT = -1
@@ -72,14 +79,39 @@ module Types =
         timestampUTC: DateTime;
     }
 
+    type HopsTestingSession = {
+        sessionKey : string
+    }
+
+    type HopsTestingSessionUpdate = {
+        session : HopsTestingSession;
+        hopsPerCurrentRequest : int;
+    }
+
+    type NodeHopsTestingRequest = {
+        hopsTestingSession : HopsTestingSession;
+        key : string;
+        data : string;
+    }
+
+    type NodeActorState = {
+        nodeData : NodeData;
+        peers : IActorRef list;
+    }
+
     type NodeActorUpdate = 
     | BootRequest of address:BigInteger * peersLength: int
     | Message of Message
-    | SendMessageRequest of string
+    | NodeHopsTestingRequest of NodeHopsTestingRequest
 
     type MessageToSend = {
         message: Message;
         recipient: NodeInfo;
+    }
+
+    type HopsTestingRequest = {
+        hopsTestingData : HopsTestingSession;
+        sendersCount : int;
     }
 
     type NetworkRequest = 
@@ -87,4 +119,5 @@ module Types =
     | GetActorRef of address: string
     | NewActorRef of NodeData
     | BootNode of address: BigInteger
-    | BroadcastMessage of msg: string
+    | HopsTestingRequest of HopsTestingRequest
+    | HopsTestingSessionUpdate of HopsTestingSessionUpdate
