@@ -46,6 +46,7 @@ let main argv =
     
     // network join
     for i in 2..numNodes do
+        System.Threading.Thread.Sleep(1000) // give it a second to initialize
         newNodeIpAddress <- newNodeIpAddress + bigint 1        
         Joining.joinNetwork networkRef newNodeIpAddress
 

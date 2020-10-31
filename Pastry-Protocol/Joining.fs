@@ -87,86 +87,84 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
 
   let rec imp a =
     actor {
-      let (lastState, (peers:IActorRef list)) = a
+      let (nodeData, (peers:IActorRef list)) = a
       let! objMsg = mailbox.Receive()
 
+      let lastIsInitialized = nodeData.nodeState.isTablesSpread
       let hz = "NODE------------------------------------------------------------------------------------------------------"
-      log <| sprintf "%s\nNodeData %s; Message %s; PeersLength %i\n%s" hz (json lastState) (json objMsg) (peers.Length) hz
+      log <| sprintf "%s\r\nNodeData:%s\r\n;Message:%s\r\n;PeersLength:%i\r\n%s" hz (json nodeData) (json objMsg) (peers.Length) hz
       let nodeUpdate = (objMsg :> obj) :?> Types.NodeActorUpdate
       let sendMessageToCurrentPeers = sendMessage peers
 
 
-      let updatedState = 
+      let (nodeData, peers) = 
         match nodeUpdate with 
         | SendMessageRequest text ->
             let message = {
-                Message.request_initiator = lastState.node.nodeInfo;
+                Message.request_initiator = nodeData.node.nodeInfo;
                 Message.data = Custom(text);
                 Message.prev_peer = None;
                 Message.timestampUTC = DateTime.UtcNow;
                 Message.requestNumber = 1;
             }
-            let messagesToSend = Array.map (fun i -> {MessageToSend.recipient = i; MessageToSend.message = message}) (peersFromAllTables lastState.node)
+            let messagesToSend = Array.map (fun i -> {MessageToSend.recipient = i; MessageToSend.message = message}) (peersFromAllTables nodeData.node)
             sendMessages peers messagesToSend |> ignore
-            None
+            (nodeData, peers)
         | Message message -> 
-            let (newState, messagesToSend) = Routing.onMessage (lastState, message)
-           
-            let newPeers = sendMessagesWithTimeout peers messagesToSend 1000
+            let (nodeData, messagesToSend) = Routing.onMessage (nodeData, message)                      
+            let peers = sendMessagesWithTimeout peers messagesToSend 1000
 
-            Some((newState, newPeers))
+            (nodeData, peers)
         | BootRequest (address, peers) -> 
-            let bootNode = lastState.node
-
-            if not lastState.nodeState.isTablesSpread then raise <| invalidOp("it's not initialized yet")
+            if not nodeData.nodeState.isTablesSpread then raise <| invalidOp("it's not initialized yet")
 
             let routingTableRow = 
-                match bootNode.routing_table with 
+                match nodeData.node.routing_table with 
                 | Initialized table -> 
                     let routingTable = Array.copy <| Array.head table
                     routingTable
                 | Uninitialized _ -> raise <| invalidOp("node with uninitialized routingTable cannot be used as a boot node")
 
             let newNodeNeighbors = 
-                [[|Some(bootNode.nodeInfo)|]; Array.copy bootNode.neighborhood_set] 
+                [[|Some(nodeData.node.nodeInfo)|]; Array.copy nodeData.node.neighborhood_set] 
                 |> Array.concat
                 |> sortByIgnoreNone (fun i -> i.address) 
                 |> Array.truncate Config.neighborhoodSize
 
-            let newNode = getNewNodeInfo (Uninitialized([||])) newNodeNeighbors address
-            let newNodeMetadata = {isLeafSetReady = false; isRoutingTableReady = false; isTablesSpread = false}
-            let newNetworkData = { peers = peers }
+            let newNodeTemp = getNewNodeInfo (Uninitialized([||])) newNodeNeighbors address
+            let newNodeMetadataTemp = {isLeafSetReady = false; isRoutingTableReady = false; isTablesSpread = false}
+            let newNetworkDataTemp = { peers = peers }
             // NOTES1: neighborhood set should be modified here.. boot should update and current node should update
             // neighborhood is set in getNewNodeInfo, and it will be sent back to the node in spreadTables
 
-            let newNodeData = { node = newNode; nodeState = newNodeMetadata; network = newNetworkData }
+            let joiningNodeData = { node = newNodeTemp; nodeState = newNodeMetadataTemp; network = newNetworkDataTemp }
 
             // here network has info about the new node and it will be able to receive messages (leafset etc)
-            mailbox.Context.Parent.Ask(NewActorRef(newNodeData)) |> Async.AwaitTask |> Async.Ignore |> Async.RunSynchronously
+            mailbox.Context.Parent.Ask(NewActorRef(joiningNodeData)) |> Async.AwaitTask |> Async.Ignore |> Async.RunSynchronously
 
             let date = DateTime.UtcNow
             let message = { // TODO redo these to give nodes to send to
                 requestNumber = 1;
                 prev_peer = None;
-                request_initiator = bootNode.nodeInfo;
+                request_initiator = nodeData.node.nodeInfo;
                 data = RoutingTableRow(routingTableRow, 1);
                 timestampUTC = date;
             }
 
-            let newList = sendMessageToCurrentPeers message newNode.nodeInfo
+            let newList = sendMessageToCurrentPeers message joiningNodeData.node.nodeInfo
 
-            let nodeInfo = Routing.getForwardToNode bootNode newNode.nodeInfo.identifier
+            let nodeInfo = Routing.getForwardToNode nodeData.node joiningNodeData.node.nodeInfo.identifier
             
             let sendMessageToNewPeers = sendMessage newList
 
-            let newerList = 
+            let peers = 
                 match nodeInfo with 
                 | Some nextNode -> 
                     let message = {
                         requestNumber = 1;
-                        data = Join(newNode.nodeInfo.identifier);
+                        data = Join(joiningNodeData.node.nodeInfo.identifier);
                         prev_peer = None;
-                        request_initiator = newNode.nodeInfo;
+                        request_initiator = joiningNodeData.node.nodeInfo;
                         Message.timestampUTC = date
                     }
 
@@ -175,61 +173,67 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
                     let message = {
                         requestNumber = 1; 
                         prev_peer = None; 
-                        request_initiator = bootNode.nodeInfo;
-                        data = LeafSet(bootNode.leaf_set);
+                        request_initiator = nodeData.node.nodeInfo;
+                        data = LeafSet(nodeData.node.leaf_set);
                         timestampUTC = date;
                     }
-                    sendMessageToNewPeers message newNode.nodeInfo 
-            Some({ nodeData with network = newNetworkData } , newerList)
+                    sendMessageToNewPeers message joiningNodeData.node.nodeInfo 
+            (nodeData, peers)
+             
+      log <| sprintf "%s updating state to: %s" nodeData.node.nodeInfo.identifier (json nodeData)
 
-      let (newState, newPeers) = Option.defaultValue (lastState, peers) updatedState
-    
-      log <| sprintf "%s updating state to: %s" newState.node.nodeInfo.identifier (json newState)
+      if lastIsInitialized = false && nodeData.nodeState.isTablesSpread = true then
+            mailbox.Context.Parent <! NodeInitialized(nodeData.node.nodeInfo.address)
 
-      return! imp (newState, newPeers)
+      return! imp (nodeData, peers)
     }
   imp (nodeData, initialActors)
 
 let networkActor (mailbox : Actor<'a>) =
-    let rec imp (peers:IActorRef list, totalLength: int) = 
+    let rec imp (peers:((IActorRef * bool) list)) = 
         actor {
             let! objMsg = mailbox.Receive()
 
             let hz = "NETWORK------------------------------------------------------------------------------------------------------"
-            log <| sprintf "%s Message %s; Peers %i; %s" hz (json objMsg) (peers.Length) hz
+            log <| sprintf "%s\r\nMessage: %s\r\n;Peers: %i\r\n;%s" hz (json objMsg) (peers.Length) hz
 
             let msg = (objMsg :> obj) :?> NetworkRequest
 
-            let mutable totalLength = totalLength
+            let mutable totalLength = peers.Length
+            let initedPeers = 
+                peers
+                |> List.filter (fun (_, isInited) -> isInited) 
+                |> List.map (fun (i, _) -> i)
 
             let updatedPeers = 
                 match msg with 
+                | NodeInitialized address ->
+                    let (actorRef, isInited) = List.find (fun ((i:IActorRef), _) -> (BigInteger.Parse i.Path.Name) = address) peers
+                    Some <| (actorRef, true) :: List.except [(actorRef, isInited)] peers
                 | BroadcastMessage str -> 
                     Seq.iter (fun i -> i <! SendMessageRequest(str)) (mailbox.Context.GetChildren())
                     None
                 | GetActorRef id -> 
-                    let peerRef = List.find (fun (i:IActorRef) -> i.Path.Name = id) peers
+                    let (peerRef, _) = List.find (fun (i:IActorRef, _) -> i.Path.Name = id) peers
                     mailbox.Context.Sender.Tell(peerRef, mailbox.Context.Self)
                     None
                 | BootNode address -> 
-                    let isBootstrap = peers.Length = 0
-                    if isBootstrap 
-                        then raise <| invalidOp("it is still bootstrapping!")
-                        else 
-                            let closestPeer = peers |> List.minBy (fun i -> abs ((BigInteger.Parse i.Path.Name) - address))
-                            totalLength <- totalLength + 1
-                            closestPeer <! BootRequest(address, totalLength)
+                    let closestPeer = 
+                        initedPeers |> List.minBy (fun i -> abs ((BigInteger.Parse i.Path.Name) - address))
+                    totalLength <- totalLength + 1
+                    closestPeer <! BootRequest(address, totalLength)
                     None
-                | NewActorRef nodeData -> 
-                    let newPeerActorRef = spawnChild (nodeActor nodeData peers) (nodeData.node.nodeInfo.address.ToString()) mailbox
+                | NewActorRef nodeData ->         
+                    let isBootstrap = peers.Length = 0
+                    let newPeerActorRef = spawnChild (nodeActor nodeData initedPeers) (nodeData.node.nodeInfo.address.ToString()) mailbox
                     mailbox.Context.Sender.Tell(newPeerActorRef, mailbox.Context.Self)
-                    Some(newPeerActorRef :: peers)
+                    Some <| (newPeerActorRef, isBootstrap) :: peers
 
             let newPeers = Option.defaultValue peers updatedPeers
 
-            return! imp (newPeers, totalLength)
+            return! imp newPeers
         }
-    imp ([], 1)
+    imp ([])
 
 let bootstrapNetwork ipAddress = 
     let routingTableColumns = Array.init Config.routingTableColumns (fun _ -> None)

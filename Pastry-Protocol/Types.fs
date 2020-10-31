@@ -83,6 +83,7 @@ module Types =
     }
 
     type NetworkRequest = 
+    | NodeInitialized of address: bigint
     | GetActorRef of address: string
     | NewActorRef of NodeData
     | BootNode of address: BigInteger
