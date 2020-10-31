@@ -42,13 +42,13 @@ let main argv =
 
     let mutable s = numRequests / 2
     let mutable newNodeIpAddress = BigInteger 80100200500L
-    let networkRef = Joining.bootstrapNetwork newNodeIpAddress
+    let networkRef = Actors.bootstrapNetwork newNodeIpAddress
     
     // network join
     for i in 2..numNodes do
         System.Threading. Thread.Sleep(1000) // give it a second to initialize
         newNodeIpAddress <- newNodeIpAddress + bigint 1        
-        Joining.joinNetwork networkRef newNodeIpAddress
+        Actors.joinNetwork networkRef newNodeIpAddress
 
     // test messages + calculate hops    
     let testingSessionKey = "random"

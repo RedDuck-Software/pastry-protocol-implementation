@@ -11,9 +11,8 @@
     <Compile Include="Config.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="Utils.fs" />
-    <Compile Include="Routing.fs" />
-    <Compile Include="Joining.fs" />
-	<Compile Include="PastryAPI.fs" />
+    <Compile Include="Domain.fs" />
+    <Compile Include="Actors.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

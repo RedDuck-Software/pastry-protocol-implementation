@@ -1,4 +1,4 @@
-﻿module Joining
+﻿module Actors
 
 open System.Text
 open System.Linq
@@ -123,7 +123,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
                 requestNumber = 1;
             }
 
-            let nextNode = Routing.getForwardToNode nodeData.node request.key
+            let nextNode = Domain.getNodeToForwardTo nodeData.node request.key
 
             match message.data with
             | Custom _ ->
@@ -134,7 +134,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
 
             (nodeData, peers)
         | Message message ->
-            let (nodeData, messagesToSend) = Routing.onMessage (nodeData, message)
+            let (nodeData, messagesToSend) = Domain.onMessage (nodeData, message)
 
             let peers = 
                 match message.data with 
@@ -186,7 +186,7 @@ let nodeActor (nodeData: NodeData) (initialActors: IActorRef list) (mailbox : Ac
             }
 
             let newList = sendMessageToCurrentPeers message joiningNodeData.node.nodeInfo
-            let nodeInfo = Routing.getForwardToNode nodeData.node joiningNodeData.node.nodeInfo.identifier            
+            let nodeInfo = Domain.getNodeToForwardTo nodeData.node joiningNodeData.node.nodeInfo.identifier            
             let sendMessageToNewPeers = sendMessage newList
 
             let peers = 

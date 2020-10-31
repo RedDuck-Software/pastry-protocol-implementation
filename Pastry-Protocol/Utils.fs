@@ -5,6 +5,8 @@ open CSharp.Utils
 open System.Numerics
 
 module Utils =
+    let bigIntCompare ((a:bigint), (b:bigint)) = enum<ComparisonResult> <| a.CompareTo(b)
+    let dataCompare mapper (a, b) = bigIntCompare (mapper a, mapper b)
     let onlySome a = Array.choose id a
     let allLeaves leafSet = [leafSet.left; leafSet.right] |> Array.concat |> onlySome
     let peersFromAllTables node = 
@@ -39,3 +41,4 @@ module Utils =
             for i in 1..noneCount do
                 yield None
         }) |> Array.ofSeq
+    let leavesDataSelector i = convertBaseFrom Config.numberBase i.identifier

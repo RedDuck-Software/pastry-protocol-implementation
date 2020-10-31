@@ -2,7 +2,8 @@
 
 open System
 
-module Routing = 
+// pure routing / messagehandling logic i.e domain
+module Domain = 
 
     open Types
     open Utils
@@ -20,12 +21,11 @@ module Routing =
         let result = int <| System.Math.Log(float network.peers, float <| pown 2 Config.b)
         if result = 0 then 1 else result
 
-    let sendMessage (toNode:NodeInfo) (message:Message) = { message = message; recipient = toNode }
+    let getMessageToSend (toNode:NodeInfo) (message:Message) = { message = message; recipient = toNode }
 
-        // pure
     // that's simply routing of a message, if noteTo = key I think we don't need it. 
     // Returns Some if found something better than current node and None if current node is the closest
-    let getForwardToNode currentNode key =
+    let getNodeToForwardTo currentNode key =
         if currentNode.nodeInfo.identifier = key then None
         else
             let leafSet = allLeaves currentNode.leaf_set
@@ -67,48 +67,7 @@ module Routing =
                     | Uninitialized _ -> raise <| invalidOp("Attempt to route a message through uninitialized node")
           
 
-
-    let onJoinMessage currentNodeState message key date = 
-        let currentNode = currentNodeState.node
-        match currentNode.routing_table with 
-        | Initialized routingTable ->
-            let row = Array.tryItem message.requestNumber routingTable
-            let nextNode = getForwardToNode currentNode key
-
-            let routingMessage = row |> Option.bind (fun row -> 
-                let routingTableMsg = { 
-                    data = RoutingTableRow(row, message.requestNumber); 
-                    prev_peer = None;
-                    request_initiator = currentNode.nodeInfo; 
-                    requestNumber = message.requestNumber + 1;
-                    timestampUTC = date
-                }
-                Some(sendMessage message.request_initiator routingTableMsg))
-    
-            let anotherMessage = 
-                match nextNode with 
-                | Some nextNode -> // forward to the next node
-                        let message = { 
-                                        message with 
-                                            prev_peer = Some(currentNode.nodeInfo); 
-                                            requestNumber = message.requestNumber + 1 
-                        }
-                        sendMessage nextNode message
-                | None -> // send leaf set as this node is the closest
-                        let leafSetMessage = { 
-                            requestNumber = 1; 
-                            prev_peer = None; 
-                            request_initiator = currentNode.nodeInfo; 
-                            data = LeafSet(currentNode.leaf_set);
-                            timestampUTC = date;
-                        } 
-                        sendMessage message.request_initiator leafSetMessage
-
-            (currentNodeState, [|routingMessage; Some(anotherMessage)|] |> onlySome |> Array.toList)
-
-        | Uninitialized _ -> raise <| invalidOp("uninitialized node cannot process join requests")
-
-    let updateTables currentNode newLeftLeaves newRightLeaves newNeighbors newRoutingTable = 
+    let getUpdatedTables currentNode newLeftLeaves newRightLeaves newNeighbors newRoutingTable = 
         let newNode = { 
             currentNode with 
                 routing_table = newRoutingTable; 
@@ -120,32 +79,12 @@ module Routing =
         }
         newNode
 
-    let isReady nodeData = 
+    let isReadyToSpreadTables nodeData = 
         let isLeafsetReady = nodeData.nodeState.isLeafSetReady
         let isRoutingReady = nodeData.nodeState.isRoutingTableReady
         let isRoutingSet = isRoutingInitialized nodeData.node.routing_table
 
         isRoutingReady && isLeafsetReady && isRoutingSet
-
-    let spreadTables nodeData requestDate = 
-        let node = nodeData.node
-        match node.routing_table with
-        | Initialized _ -> 
-            let allPeers = peersFromAllTables node
-        
-            let message = { 
-                data = NewNodeState(nodeData); 
-                prev_peer = None;
-                requestNumber = 1;
-                request_initiator = node.nodeInfo;
-                timestampUTC = requestDate
-            }
-
-            let messagesToSend = allPeers |> Array.map (fun peer -> sendMessage peer message) |> Array.toList
-            let newNodeState = { nodeData.nodeState with isTablesSpread = true }
-
-            ({ nodeData with nodeState = newNodeState}, messagesToSend)
-        | Uninitialized _ -> raise <| invalidOp("Cannot spread tables when routing table is uninitialized")
 
     // if alls rows are in place make it initialized()
     let ensureInitialized nodeData =
@@ -160,7 +99,67 @@ module Routing =
                     { nodeData with node = { node with routing_table = Initialized(newTable) } }
                 else nodeData
 
-    let onRoutingTableUpdate currentNodeData row rowNumber = // row number i.e not index
+    let onJoinMessage currentNodeState message key date = 
+        let currentNode = currentNodeState.node
+        match currentNode.routing_table with 
+        | Initialized routingTable ->
+            let row = Array.tryItem message.requestNumber routingTable
+            let nextNode = getNodeToForwardTo currentNode key
+
+            let routingMessage = row |> Option.bind (fun row -> 
+                let routingTableMsg = { 
+                    data = RoutingTableRow(row, message.requestNumber); 
+                    prev_peer = None;
+                    request_initiator = currentNode.nodeInfo; 
+                    requestNumber = message.requestNumber + 1;
+                    timestampUTC = date
+                }
+                Some(getMessageToSend message.request_initiator routingTableMsg))
+    
+            let anotherMessage = 
+                match nextNode with 
+                | Some nextNode -> // forward to the next node
+                        let message = { 
+                                        message with 
+                                            prev_peer = Some(currentNode.nodeInfo); 
+                                            requestNumber = message.requestNumber + 1 
+                        }
+                        getMessageToSend nextNode message
+                | None -> // send leaf set as this node is the closest
+                        let leafSetMessage = { 
+                            requestNumber = 1; 
+                            prev_peer = None; 
+                            request_initiator = currentNode.nodeInfo; 
+                            data = LeafSet(currentNode.leaf_set);
+                            timestampUTC = date;
+                        } 
+                        getMessageToSend message.request_initiator leafSetMessage
+
+            (currentNodeState, [|routingMessage; Some(anotherMessage)|] |> onlySome |> Array.toList)
+
+        | Uninitialized _ -> raise <| invalidOp("uninitialized node cannot process join requests")
+
+    let onSpreadTables nodeData requestDate = 
+        let node = nodeData.node
+        match node.routing_table with
+        | Initialized _ -> 
+            let allPeers = peersFromAllTables node
+        
+            let message = { 
+                data = NewNodeState(nodeData); 
+                prev_peer = None;
+                requestNumber = 1;
+                request_initiator = node.nodeInfo;
+                timestampUTC = requestDate
+            }
+
+            let messagesToSend = allPeers |> Array.map (fun peer -> getMessageToSend peer message) |> Array.toList
+            let newNodeState = { nodeData.nodeState with isTablesSpread = true }
+
+            ({ nodeData with nodeState = newNodeState}, messagesToSend)
+        | Uninitialized _ -> raise <| invalidOp("Cannot spread tables when routing table is uninitialized")
+
+    let onRoutingTableUpdate currentNodeData row rowNumber =
         let currentNode = currentNodeData.node
         let newNodeData =
             match currentNode.routing_table with 
@@ -180,7 +179,7 @@ module Routing =
 
                         { currentNodeData with node = { currentNode with routing_table = Uninitialized(newTable) } }
                     else 
-                        unInitTable.[rowNumber - 1] <- Some(row)
+                        unInitTable.[rowNumber] <- Some(row)
                         { currentNodeData with node = { currentNode with routing_table = Uninitialized(unInitTable) } }
             | Initialized initTable -> 
                 initTable.[rowNumber] <- row
@@ -192,31 +191,6 @@ module Routing =
         let newNodeData = { newNodeData with nodeState = { newNodeData.nodeState with isRoutingTableReady = routingTableReady } }
 
         ensureInitialized newNodeData
-
-    let bigIntCompare ((a:bigint), (b:bigint)) = enum<ComparisonResult> <| a.CompareTo(b)
-    let dataCompare mapper (a, b) = bigIntCompare (mapper a, mapper b)
-    let updateRange (collectionSelector: Node -> NodeInfo Option []) (dataSelector: NodeInfo -> bigint) (allNodes:#seq<NodeInfo>) (currentNode: Node)  = 
-        let collection = Array.copy (collectionSelector currentNode) 
-        let compare = dataCompare dataSelector
-        for node in allNodes do
-            if not <| Array.exists (fun (i:Option<NodeInfo>) -> 
-                    match i with 
-                    | Some nodeInfo -> compare (nodeInfo, node) = ComparisonResult.Eq
-                    | None -> false) collection
-                then
-                    if Array.forall (fun (i:Option<NodeInfo>) -> i.IsSome) collection
-                        then 
-                            if compare (collection.[0].Value, node) = ComparisonResult.LT
-                                then collection.[0] <- Some(node)
-                            else if compare ((Array.last collection).Value, node) = ComparisonResult.GT
-                                then collection.[collection.Length - 1] <- Some(node)
-                            else () // not within the range
-                        else                     
-                            let noneIndex = Array.findIndex (fun (i:Option<NodeInfo>) -> i.IsNone) collection
-                            collection.[noneIndex] <- Some(node)
-        sortByIgnoreNone dataSelector collection
-
-    let leavesDataSelector i = convertBaseFrom Config.numberBase i.identifier
 
     let updateRoutingTableCapacity nodeData (peers:int) = 
         let node = nodeData.node
@@ -238,12 +212,30 @@ module Routing =
                     else 
                         Initialized(table)
         { nodeData with node = { node with routing_table = newRoutingTable }; network = { network with peers = peers } }
-        
 
+    let updateRange (collectionSelector: Node -> NodeInfo Option []) (dataSelector: NodeInfo -> bigint) (allNodes:#seq<NodeInfo>) (currentNode: Node)  = 
+        let collection = Array.copy (collectionSelector currentNode) 
+        let compare = dataCompare dataSelector
+        for node in allNodes do
+            if not <| Array.exists (fun (i:Option<NodeInfo>) -> 
+                    match i with 
+                    | Some nodeInfo -> compare (nodeInfo, node) = ComparisonResult.Eq
+                    | None -> false) collection
+                then
+                    if Array.forall (fun (i:Option<NodeInfo>) -> i.IsSome) collection
+                        then 
+                            if compare (collection.[0].Value, node) = ComparisonResult.LT
+                                then collection.[0] <- Some(node)
+                            else if compare ((Array.last collection).Value, node) = ComparisonResult.GT
+                                then collection.[collection.Length - 1] <- Some(node)
+                            else () // not within the range
+                        else                     
+                            let noneIndex = Array.findIndex (fun (i:Option<NodeInfo>) -> i.IsNone) collection
+                            collection.[noneIndex] <- Some(node)
+        sortByIgnoreNone dataSelector collection       
     let getNewLeftLeaves peers node = updateRange (fun i -> i.leaf_set.left) leavesDataSelector (Array.where (fun i -> dataCompare leavesDataSelector (i, node.nodeInfo) = ComparisonResult.LT) peers) node
     let getNewRightLeaves peers node = updateRange (fun i -> i.leaf_set.right) leavesDataSelector (Array.where (fun i -> dataCompare leavesDataSelector (i, node.nodeInfo)  = ComparisonResult.GT) peers) node
     let getNewNeighbors = updateRange (fun i -> i.neighborhood_set) (fun i -> i.address)
-
     let getNewRoutingTable (currentNode: Node) (allNodes:#seq<NodeInfo>) =
         let mutable tableState = currentNode.routing_table
         
@@ -291,10 +283,11 @@ module Routing =
             let newNeighbors = getNewNeighbors allNodes currentNodeData.node
             let newRoutingTable = getNewRoutingTable currentNodeData.node allNodes
 
-            updateTables currentNodeData.node newLeftLeaves newRightLeaves newNeighbors newRoutingTable
+            getUpdatedTables currentNodeData.node newLeftLeaves newRightLeaves newNeighbors newRoutingTable
 
         | Uninitialized _ -> raise <| invalidOp("uninitialized node cannot react on new nodes joining!")        
 
+    // PURE
     let onMessage (a:(NodeData * Message)) : (NodeData * MessageToSend list) =
         let (currentNodeData, message) = a
         let (newNodeState, messagesToSend) =
@@ -311,7 +304,7 @@ module Routing =
                         let newNode = onNewNodeState currentNodeData newNode
                         ({ currentNodeData with node = newNode; }, [])
             | Custom msg -> 
-                        let routeResult = getForwardToNode currentNodeData.node msg.recipientKey
+                        let routeResult = getNodeToForwardTo currentNodeData.node msg.recipientKey
                         match routeResult with 
                         | None -> (currentNodeData, [])
                         | Some nodeInfo -> 
@@ -319,12 +312,12 @@ module Routing =
                             (currentNodeData, [msgToSend])
             | _ -> raise <| invalidOp("message.data is invalid")
     
-        let isReadyToSpread = isReady newNodeState && (not <| newNodeState.nodeState.isTablesSpread)
+        let isReadyToSpread = isReadyToSpreadTables newNodeState && (not <| newNodeState.nodeState.isTablesSpread)
 
         let (newNodeState1, spreadTableMessages) = 
             if isReadyToSpread
                 then 
-                    let (nData, messages) = spreadTables newNodeState DateTime.UtcNow
+                    let (nData, messages) = onSpreadTables newNodeState DateTime.UtcNow
                     (Some(nData), messages)
                 else (None, [])
 
