@@ -21,8 +21,8 @@ let rnd = System.Random()
 
 [<EntryPoint>]
 let main argv =
-    let numNodes = int argv.[0]
-    let numRequests = int argv.[1]
+    let numNodes = 10 //int argv.[0]
+    let numRequests = 5 //int argv.[1]
     let logDirectory = Path.Combine(Path.GetTempPath(), Assembly.GetCallingAssembly().FullName)
     if not <| System.IO.Directory.Exists(logDirectory)
         then Directory.CreateDirectory(logDirectory) |> ignore
